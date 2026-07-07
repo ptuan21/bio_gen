@@ -1,0 +1,7 @@
+/target
+**/*.rs.bk
+Cargo.lock
+# generated wasm package
+/web/pkg
+/crates/bio-wasm/pkg
+node_modules

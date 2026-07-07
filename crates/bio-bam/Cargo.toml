@@ -1,0 +1,10 @@
+[package]
+name = "bio-bam"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "BGZF decompression and sequential BAM alignment parsing"
+
+[dependencies]
+bio-core = { path = "../bio-core" }
+miniz_oxide = "0.8"

@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/bio-core", "crates/bio-bam", "crates/bio-wasm"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/example/bio_gen"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
