@@ -12,6 +12,10 @@ pub enum BamError {
     Inflate(String),
     /// The BAM magic bytes `BAM\1` were absent.
     BadMagic,
+    /// The BAI magic bytes `BAI\1` were absent.
+    BadBaiMagic,
+    /// The requested reference name is not in the BAM header.
+    UnknownReference(String),
 }
 
 impl fmt::Display for BamError {
@@ -22,6 +26,8 @@ impl fmt::Display for BamError {
             BamError::MissingBlockSize => write!(f, "BGZF block missing BC subfield"),
             BamError::Inflate(msg) => write!(f, "inflate error: {msg}"),
             BamError::BadMagic => write!(f, "not a BAM stream (bad magic)"),
+            BamError::BadBaiMagic => write!(f, "not a BAI index (bad magic)"),
+            BamError::UnknownReference(name) => write!(f, "reference '{name}' not found"),
         }
     }
 }

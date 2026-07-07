@@ -23,9 +23,12 @@ bio_gen/
 │   │   │                        ORF finder, k-mer, restriction sites
 │   │   ├── examples/pipeline.rs end-to-end demo
 │   │   └── tests/               integration tests (incl. edge cases)
-│   ├── bio-bam/                BGZF decompression + BAM parsing (miniz_oxide)
+│   ├── bio-bam/                BGZF + BAM + BAI region queries (miniz_oxide)
 │   └── bio-wasm/               thin wasm-bindgen bindings over the two crates
-├── web/index.html             browser demo (loads web/pkg)
+├── web/
+│   ├── index.html             browser demo (UI + rendering only)
+│   ├── worker.js              runs the wasm engine off the main thread
+│   └── sample.js              in-browser BAM+BAI generator for testing
 └── scripts/
     ├── build-wasm.sh           build the wasm package into web/pkg
     └── serve.sh                static server for the demo
@@ -38,6 +41,8 @@ only crate needing a DEFLATE implementation), so the core stays dependency-free.
 ## Features
 
 - Streaming **FASTA** and **FASTQ** parsers (record-by-record, memory-friendly)
+- Push-based **`FastaStreamer`** for multi-GB files: feed byte chunks, get
+  per-record summaries (id, length, GC) with **flat O(1) memory**
 - DNA/RNA `Sequence` with validation, IUPAC ambiguity codes, complement,
   reverse-complement, transcription
 - Base composition & **GC content**
@@ -50,7 +55,14 @@ only crate needing a DEFLATE implementation), so the core stays dependency-free.
 - **GC-skew** over sliding windows
 - **Restriction digest** with a built-in enzyme panel (EcoRI, BamHI, …)
 - **Vertebrate mitochondrial** genetic code (alongside the standard code)
-- **BGZF** decompression and sequential **BAM** parsing (no BAI random access yet)
+- **BGZF** decompression, sequential **BAM** parsing, and **BAI-indexed region
+  queries** with **true random access** — a region inflates only the BGZF blocks
+  the index points at (and just enough leading blocks for the header), never the
+  whole file
+- **Coverage pileup** (per-position depth, base counts and consensus) built by
+  walking each alignment's CIGAR
+- **SNV calling** from the pileup: consensus vs a reference, with depth/frequency
+  thresholds and allele frequency per call
 
 ## Develop
 
@@ -72,11 +84,16 @@ cargo clippy --all-targets -- -D warnings
 
 ```bash
 ./scripts/build-wasm.sh   # generates web/pkg
-./scripts/serve.sh        # http://localhost:8000/web/
+./scripts/serve.sh        # http://localhost:8000/
 ```
 
 The demo parses FASTA/BAM, searches motifs (highlighting hits on the sequence),
 translates, finds ORFs, runs restriction digests and more — all client-side.
+The wasm engine runs in a **Web Worker** (`web/worker.js`), so the UI never
+blocks; open `#run` to auto-run the whole pipeline.
+No BAM file to hand? Click **Generate sample BAM** to synthesize aligned reads
+(with a planted SNV) from the reference in the input box, then try Coverage and
+Call variants against it.
 
 ## Using it from JavaScript
 
@@ -94,11 +111,18 @@ const effect = mutation_effect("ATGGCCTAA", 1, "C", false); // { kind: "missense
 Exports: `parse_fasta`, `sequence_stats`, `reverse_complement`, `transcribe`,
 `translate_seq` (with `mito` flag), `six_frame_translation`,
 `find_open_reading_frames`, `count_kmers`, `search_motif`, `gc_skew_windows`,
-`restriction_digest`, `call_variants`, `mutation_effect`, `parse_bam`.
+`restriction_digest`, `call_variants`, `mutation_effect`, `parse_bam`,
+`parse_bam_region`, `bam_pileup`, `call_variants_pileup`.
 
 ## Roadmap
 
 - [x] BGZF decompression + sequential BAM parsing
-- [ ] BAI index for BAM random access (region queries)
-- [ ] Frontend viewer (canvas/WebGL track rendering) on top of the WASM API
-- [ ] Proper alignment for indel-aware variant calling
+- [x] BAI index for BAM region queries
+- [x] Coverage / pileup track from region alignments (with a canvas view in the demo)
+- [x] SNV calling from pileup (consensus vs reference)
+- [x] True BGZF random access — region queries inflate only the needed blocks
+- [x] Engine runs in a Web Worker (non-blocking UI)
+- [x] Chunked `File.slice` streaming for multi-GB FASTA (flat memory, progress)
+- [ ] Quality-aware variant calling (use Phred scores, strand bias)
+- [ ] Full canvas/WebGL alignment track (reads laid out by row)
+- [ ] Indel-aware calling (insertions/deletions) with proper alignment

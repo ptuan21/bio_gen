@@ -13,10 +13,13 @@ use bio_core::analysis::translate::{
     point_mutation_effect, six_frames, translate_with, GeneticCode, MutationEffect,
 };
 use bio_core::analysis::variant::call_substitutions;
-use bio_core::parser::parse_fasta_str;
+use bio_core::parser::{parse_fasta_str, FastaStreamer as CoreFastaStreamer, RecordSummary};
 use bio_core::sequence::{SeqKind, Sequence};
 
-use bio_bam::read_bam;
+use bio_bam::bam::BamRecord;
+use bio_bam::pileup::pileup;
+use bio_bam::varcall::call_variants as call_pileup_variants;
+use bio_bam::{read_bam, read_bam_region};
 
 fn kind(is_rna: bool) -> SeqKind {
     if is_rna {
@@ -36,6 +39,53 @@ fn to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
 
 fn make_seq(seq: &str, is_rna: bool) -> Result<Sequence, JsValue> {
     Sequence::new(kind(is_rna), seq.as_bytes().to_vec()).map_err(to_js_err)
+}
+
+#[derive(Serialize)]
+struct SummaryDto {
+    id: String,
+    description: String,
+    length: usize,
+    gc_content: f64,
+}
+
+fn summaries(records: Vec<RecordSummary>) -> Vec<SummaryDto> {
+    records
+        .into_iter()
+        .map(|r| SummaryDto {
+            id: r.id,
+            description: r.description,
+            length: r.length,
+            gc_content: r.gc_content,
+        })
+        .collect()
+}
+
+/// Streaming FASTA parser for multi-gigabyte files: feed byte chunks with
+/// `push`, then call `finish`. Memory stays flat; each call returns summaries
+/// for the records that completed.
+#[wasm_bindgen]
+pub struct FastaStreamer {
+    inner: CoreFastaStreamer,
+}
+
+#[wasm_bindgen]
+impl FastaStreamer {
+    #[wasm_bindgen(constructor)]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: CoreFastaStreamer::new(),
+        }
+    }
+
+    pub fn push(&mut self, chunk: &[u8]) -> Result<JsValue, JsValue> {
+        to_js(&summaries(self.inner.push(chunk)))
+    }
+
+    pub fn finish(&mut self) -> Result<JsValue, JsValue> {
+        to_js(&summaries(self.inner.finish()))
+    }
 }
 
 #[derive(Serialize)]
@@ -109,9 +159,25 @@ struct BamRecordDto {
     flag: u16,
     ref_name: Option<String>,
     pos: i32,
+    ref_span: u32,
     mapq: u8,
     cigar: String,
     seq: String,
+}
+
+impl From<BamRecord> for BamRecordDto {
+    fn from(r: BamRecord) -> Self {
+        BamRecordDto {
+            name: r.name,
+            flag: r.flag,
+            ref_name: r.ref_name,
+            pos: r.pos,
+            ref_span: r.ref_span,
+            mapq: r.mapq,
+            cigar: r.cigar,
+            seq: r.seq,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -119,6 +185,29 @@ struct BamResultDto {
     references: Vec<String>,
     record_count: usize,
     records: Vec<BamRecordDto>,
+}
+
+#[derive(Serialize)]
+struct PileupVariantDto {
+    ref_pos: i32,
+    reference: char,
+    alternate: char,
+    depth: u32,
+    alt_count: u32,
+    allele_freq: f64,
+}
+
+#[derive(Serialize)]
+struct PileupDto {
+    ref_pos: i32,
+    depth: u32,
+    a: u32,
+    c: u32,
+    g: u32,
+    t: u32,
+    n: u32,
+    del: u32,
+    consensus: Option<char>,
 }
 
 #[derive(Serialize)]
@@ -340,19 +429,83 @@ pub fn parse_bam(bytes: &[u8], max_records: usize) -> Result<JsValue, JsValue> {
     let dto = BamResultDto {
         references: header.references.into_iter().map(|r| r.name).collect(),
         record_count: records.len(),
-        records: records
-            .into_iter()
-            .take(limit)
-            .map(|r| BamRecordDto {
-                name: r.name,
-                flag: r.flag,
-                ref_name: r.ref_name,
-                pos: r.pos,
-                mapq: r.mapq,
-                cigar: r.cigar,
-                seq: r.seq,
-            })
-            .collect(),
+        records: records.into_iter().take(limit).map(Into::into).collect(),
     };
+    to_js(&dto)
+}
+
+/// Fetch BAM records overlapping `ref_name:[beg, end)` using a BAI index.
+#[wasm_bindgen]
+pub fn parse_bam_region(
+    bam: &[u8],
+    bai: &[u8],
+    ref_name: &str,
+    beg: i32,
+    end: i32,
+) -> Result<JsValue, JsValue> {
+    let records = read_bam_region(bam, bai, ref_name, beg, end).map_err(to_js_err)?;
+    let dto: Vec<BamRecordDto> = records.into_iter().map(Into::into).collect();
+    to_js(&dto)
+}
+
+/// Coverage pileup over `ref_name:[beg, end)`: region query plus per-position
+/// depth, base counts and consensus base.
+#[wasm_bindgen]
+pub fn bam_pileup(
+    bam: &[u8],
+    bai: &[u8],
+    ref_name: &str,
+    beg: i32,
+    end: i32,
+) -> Result<JsValue, JsValue> {
+    let records = read_bam_region(bam, bai, ref_name, beg, end).map_err(to_js_err)?;
+    let dto: Vec<PileupDto> = pileup(&records, beg, end)
+        .into_iter()
+        .map(|c| PileupDto {
+            ref_pos: c.ref_pos,
+            depth: c.depth,
+            a: c.a,
+            c: c.c,
+            g: c.g,
+            t: c.t,
+            n: c.n,
+            del: c.del,
+            consensus: c.consensus().map(|(base, _)| base),
+        })
+        .collect();
+    to_js(&dto)
+}
+
+/// Call SNVs in `ref_name:[beg, end)` by piling up aligned reads and comparing
+/// the consensus against `reference` (whose first base is at `ref_offset`).
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn call_variants_pileup(
+    bam: &[u8],
+    bai: &[u8],
+    ref_name: &str,
+    beg: i32,
+    end: i32,
+    reference: &str,
+    ref_offset: i32,
+    min_depth: u32,
+    min_freq: f64,
+    is_rna: bool,
+) -> Result<JsValue, JsValue> {
+    let records = read_bam_region(bam, bai, ref_name, beg, end).map_err(to_js_err)?;
+    let columns = pileup(&records, beg, end);
+    let reference = make_seq(reference, is_rna)?;
+    let dto: Vec<PileupVariantDto> =
+        call_pileup_variants(&columns, &reference, ref_offset, min_depth, min_freq)
+            .into_iter()
+            .map(|v| PileupVariantDto {
+                ref_pos: v.ref_pos,
+                reference: v.reference,
+                alternate: v.alternate,
+                depth: v.depth,
+                alt_count: v.alt_count,
+                allele_freq: v.allele_freq,
+            })
+            .collect();
     to_js(&dto)
 }

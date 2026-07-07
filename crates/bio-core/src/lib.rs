@@ -23,6 +23,6 @@ pub mod prelude {
     };
     pub use crate::analysis::variant::{call_substitutions, Variant, VariantKind};
     pub use crate::error::BioError;
-    pub use crate::parser::{FastaReader, FastqReader};
+    pub use crate::parser::{FastaReader, FastaStreamer, FastqReader, RecordSummary};
     pub use crate::sequence::{SeqKind, SeqRecord, Sequence};
 }

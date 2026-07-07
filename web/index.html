@@ -3,214 +3,608 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Interactive Genomics Viewer Lite</title>
+  <link rel="icon" href="data:," />
+  <title>Genomics Viewer Lite</title>
   <style>
-    :root { color-scheme: light dark; --accent: #2d7d46; --rev: #b5651d; }
+    :root {
+      --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f1f3f6;
+      --text: #10141b; --muted: #667085; --border: #e4e7ec;
+      --accent: #4f46e5; --accent-weak: #eef2ff; --accent-text: #ffffff;
+      --danger: #dc2626;
+      --a: #16a34a; --c: #2563eb; --g: #d97706; --t: #dc2626; --n: #9ca3af; --del: #7c3aed;
+      --radius: 10px; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0c0f15; --surface: #141922; --surface-2: #1a2029;
+        --text: #e6e9ef; --muted: #98a2b3; --border: #242b36;
+        --accent: #7c8cff; --accent-weak: #1a1f31; --accent-text: #0c0f15;
+      }
+    }
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body {
-      font: 15px/1.5 system-ui, sans-serif; margin: 0;
-      background: #0f1115; color: #e6e6e6;
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
     }
-    header { padding: 18px 22px; border-bottom: 1px solid #2a2d34; }
-    header h1 { margin: 0; font-size: 18px; }
-    header p { margin: 4px 0 0; color: #9aa0a6; font-size: 13px; }
-    main { display: grid; grid-template-columns: 380px 1fr; gap: 0; height: calc(100vh - 62px); }
-    .panel { padding: 16px 18px; overflow: auto; }
-    .panel.left { border-right: 1px solid #2a2d34; }
+
+    header {
+      display: flex; align-items: center; gap: 16px;
+      padding: 14px 22px; background: var(--surface);
+      border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; }
+    .brand .mark {
+      width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+      background: var(--accent-weak); color: var(--accent); font-size: 17px;
+    }
+    .brand h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
+    .brand p { margin: 0; font-size: 11.5px; color: var(--muted); }
+    header .spacer { flex: 1; }
+    #status {
+      font-size: 12.5px; color: var(--muted); max-width: 42ch;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #status.error { color: var(--danger); }
+    #status.ok { color: var(--a); }
+
+    main { display: grid; grid-template-columns: 320px 1fr; gap: 0; height: calc(100vh - 60px); }
+    .sidebar { overflow-y: auto; padding: 18px; border-right: 1px solid var(--border); background: var(--surface); }
+    .content { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+    .group { margin-bottom: 18px; }
+    .group > .label {
+      font-size: 10.5px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase;
+      color: var(--muted); margin: 0 0 8px;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .row + .row { margin-top: 7px; }
+
     textarea {
-      width: 100%; height: 120px; resize: vertical; font-family: ui-monospace, monospace;
-      font-size: 13px; background: #171a21; color: #e6e6e6; border: 1px solid #2a2d34;
-      border-radius: 6px; padding: 8px;
+      width: 100%; height: 104px; resize: vertical; padding: 10px;
+      font-family: var(--mono); font-size: 12.5px; color: var(--text);
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
     }
-    fieldset { border: 1px solid #2a2d34; border-radius: 8px; margin: 12px 0; padding: 10px 12px; }
-    legend { padding: 0 6px; color: #9aa0a6; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
-    button {
-      background: var(--accent); color: #fff; border: 0; border-radius: 6px;
-      padding: 6px 11px; font-size: 13px; cursor: pointer; margin: 3px 3px 3px 0;
-    }
-    button.secondary { background: #2a2d34; }
-    button:hover { filter: brightness(1.1); }
-    label { font-size: 13px; margin-right: 10px; user-select: none; }
+    textarea:focus, input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
     input[type="text"], input[type="number"] {
-      background: #171a21; color: #e6e6e6; border: 1px solid #2a2d34;
-      border-radius: 5px; padding: 4px 6px; font-size: 13px;
+      background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 7px; padding: 5px 8px; font-size: 12.5px; font-family: var(--mono);
     }
-    input[type="number"] { width: 64px; }
-    input[type="text"] { width: 120px; }
-    #status { color: #9aa0a6; font-size: 13px; min-height: 18px; }
-    #status.error { color: #e06c6c; }
-    pre {
-      background: #171a21; border: 1px solid #2a2d34; border-radius: 8px;
-      padding: 12px; overflow: auto; font-size: 12.5px; max-height: 40vh;
+    input[type="number"] { width: 62px; }
+    input[type="text"] { width: 108px; }
+    input[type="file"] { font-size: 12px; color: var(--muted); max-width: 100%; }
+    .field { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+    .hint { font-size: 11.5px; color: var(--muted); margin: 7px 0 0; line-height: 1.45; }
+
+    button {
+      font: inherit; font-size: 12.5px; cursor: pointer; border-radius: 7px;
+      padding: 6px 11px; border: 1px solid var(--border); background: var(--surface);
+      color: var(--text); transition: background .12s, border-color .12s;
     }
-    .seqview {
-      font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.7;
-      word-break: break-all; background: #171a21; border: 1px solid #2a2d34;
-      border-radius: 8px; padding: 12px; margin-top: 10px;
+    button:hover { background: var(--surface-2); border-color: var(--muted); }
+    button.primary { background: var(--accent); color: var(--accent-text); border-color: transparent; font-weight: 600; }
+    button.primary:hover { filter: brightness(1.06); background: var(--accent); }
+    button.block { width: 100%; padding: 10px; font-size: 13.5px; }
+    .switch { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .card > h2 {
+      margin: 0; padding: 11px 15px; font-size: 12px; font-weight: 600; letter-spacing: .01em;
+      border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px;
     }
-    mark.fwd { background: var(--accent); color: #fff; border-radius: 3px; }
-    mark.rev { background: var(--rev); color: #fff; border-radius: 3px; }
-    .hint { color: #9aa0a6; font-size: 12px; }
+    .card > h2 .meta { margin-left: auto; font-weight: 400; color: var(--muted); font-size: 11.5px; }
+    .card .body { padding: 15px; }
+
+    #seqview {
+      font-family: var(--mono); font-size: 13px; line-height: 1.85; word-break: break-all;
+      color: var(--text); min-height: 22px;
+    }
+    #seqview:empty::before { content: "Run an action to see results here."; color: var(--muted); font-family: system-ui; font-size: 13px; }
+    mark.fwd { background: var(--accent); color: var(--accent-text); border-radius: 3px; padding: 0 1px; }
+    mark.rev { background: var(--g); color: #fff; border-radius: 3px; padding: 0 1px; }
+
+    #cov { width: 100%; height: 150px; display: block; }
+    #helix { width: 100%; height: 210px; display: block; }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 11.5px; color: var(--muted); }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+    pre#output {
+      margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.5;
+      color: var(--text); white-space: pre-wrap; word-break: break-word; max-height: 46vh; overflow: auto;
+    }
+    pre#output:empty::before { content: "—"; color: var(--muted); }
+
+    @media (max-width: 760px) {
+      main { grid-template-columns: 1fr; height: auto; }
+      .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>🧬 Interactive Genomics Viewer Lite</h1>
-    <p>FASTA / BAM parsing &amp; sequence analysis running fully client-side in Rust + WebAssembly.</p>
+    <div class="brand">
+      <div class="mark">🧬</div>
+      <div>
+        <h1>Genomics Viewer Lite</h1>
+        <p>Client-side FASTA / BAM analysis · Rust + WebAssembly</p>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div id="status">Loading…</div>
+    <button data-act="runAll" class="primary">Run everything</button>
   </header>
 
   <main>
-    <section class="panel left">
-      <label><input type="checkbox" id="isRna" /> RNA sequence</label>
-      <textarea id="input">&gt;demo gene
+    <aside class="sidebar">
+      <div class="group">
+        <p class="label">Sequence</p>
+        <label class="switch"><input type="checkbox" id="isRna" /> Treat as RNA</label>
+        <textarea id="input" spellcheck="false">&gt;demo gene
 ATGGCCTACGGGATTCCCGAATTCAAATAGCCC</textarea>
-      <p class="hint">Paste FASTA (with &gt; header) or a raw sequence.</p>
+        <p class="hint">Paste FASTA (with a &gt; header) or a raw sequence.</p>
+        <div class="row">
+          <label class="field">Stream file <input type="file" id="fastaFile" accept=".fa,.fasta,.fna,.txt" /></label>
+        </div>
+        <p class="hint">Summarize a large .fasta in the worker, chunk by chunk (flat memory).</p>
+      </div>
 
-      <fieldset>
-        <legend>Parse &amp; stats</legend>
-        <button data-act="parse">Parse FASTA</button>
-        <button data-act="stats" class="secondary">Stats</button>
-        <button data-act="revcomp" class="secondary">Reverse-comp</button>
-        <button data-act="transcribe" class="secondary">Transcribe</button>
-      </fieldset>
+      <div class="group">
+        <p class="label">Analyze</p>
+        <div class="row">
+          <button data-act="parse">Parse FASTA</button>
+          <button data-act="stats">Stats</button>
+          <button data-act="revcomp">Rev-comp</button>
+          <button data-act="transcribe">Transcribe</button>
+          <button data-act="helix">DNA helix</button>
+        </div>
+      </div>
 
-      <fieldset>
-        <legend>Translation</legend>
-        <label><input type="checkbox" id="mito" /> Mitochondrial code</label><br />
-        <button data-act="translate">Translate</button>
-        <button data-act="sixframe" class="secondary">6-frame</button>
-        <button data-act="orfs" class="secondary">Find ORFs</button>
-        <label>min aa <input type="number" id="minAa" value="10" min="1" /></label>
-      </fieldset>
+      <div class="group">
+        <p class="label">Translate</p>
+        <div class="row">
+          <button data-act="translate">Translate</button>
+          <button data-act="sixframe">6-frame</button>
+          <label class="switch"><input type="checkbox" id="mito" /> mito code</label>
+        </div>
+        <div class="row">
+          <button data-act="orfs">Find ORFs</button>
+          <label class="field">min aa <input type="number" id="minAa" value="10" min="1" /></label>
+        </div>
+      </div>
 
-      <fieldset>
-        <legend>Search &amp; motifs</legend>
-        <label>motif <input type="text" id="motif" value="GAATTC" /></label>
-        <label><input type="checkbox" id="bothStrands" checked /> both strands</label>
-        <button data-act="search">Search</button>
-        <br />
-        <label>k <input type="number" id="k" value="3" min="1" /></label>
-        <button data-act="kmer" class="secondary">k-mer counts</button>
-      </fieldset>
+      <div class="group">
+        <p class="label">Search &amp; motifs</p>
+        <div class="row">
+          <label class="field">motif <input type="text" id="motif" value="GAATTC" /></label>
+          <label class="switch"><input type="checkbox" id="bothStrands" checked /> both</label>
+          <button data-act="search">Search</button>
+        </div>
+        <div class="row">
+          <label class="field">k <input type="number" id="k" value="3" min="1" /></label>
+          <button data-act="kmer">k-mer counts</button>
+        </div>
+      </div>
 
-      <fieldset>
-        <legend>Genomics</legend>
-        <button data-act="restriction">Restriction digest</button>
-        <button data-act="gcskew" class="secondary">GC-skew</button>
-        <label>win <input type="number" id="win" value="10" min="1" /></label>
-        <label>step <input type="number" id="step" value="5" min="1" /></label>
-      </fieldset>
+      <div class="group">
+        <p class="label">Genome</p>
+        <div class="row">
+          <button data-act="restriction">Restriction digest</button>
+          <button data-act="gcskew">GC-skew</button>
+        </div>
+        <div class="row">
+          <label class="field">win <input type="number" id="win" value="10" min="1" /></label>
+          <label class="field">step <input type="number" id="step" value="5" min="1" /></label>
+        </div>
+      </div>
 
-      <fieldset>
-        <legend>BAM (BGZF)</legend>
-        <input type="file" id="bamFile" accept=".bam" />
-        <p class="hint">Reads alignments client-side. No server upload.</p>
-      </fieldset>
-    </section>
+      <div class="group">
+        <p class="label">Alignment (BAM)</p>
+        <div class="row"><button data-act="sample" class="primary">⚙ Generate sample BAM</button></div>
+        <p class="hint">No file? Synthesize aligned reads (with a planted SNV) from the reference above.</p>
+        <div class="row">
+          <label class="field">BAM <input type="file" id="bamFile" accept=".bam" /></label>
+        </div>
+        <div class="row">
+          <label class="field">BAI <input type="file" id="baiFile" accept=".bai" /></label>
+        </div>
+        <div class="row">
+          <label class="field">ref <input type="text" id="ref" placeholder="ref" style="width:70px" /></label>
+          <label class="field">beg <input type="number" id="beg" value="0" /></label>
+          <label class="field">end <input type="number" id="end" value="100000" /></label>
+        </div>
+        <div class="row">
+          <button data-act="bamAll">Parse all</button>
+          <button data-act="bamRegion">Region</button>
+          <button data-act="pileup">Coverage</button>
+        </div>
+        <div class="row">
+          <label class="field">minDepth <input type="number" id="minDepth" value="3" min="1" /></label>
+          <label class="field">minFreq <input type="number" id="minFreq" value="0.2" min="0" max="1" step="0.05" /></label>
+          <button data-act="varcall">Call variants</button>
+        </div>
+      </div>
+    </aside>
 
-    <section class="panel">
-      <div id="status">Loading WebAssembly…</div>
-      <div id="seqview"></div>
-      <pre id="output"></pre>
+    <section class="content">
+      <div class="card" id="helixCard" style="display:none">
+        <h2>DNA double helix <span class="meta">antiparallel · base-paired</span></h2>
+        <div class="body">
+          <canvas id="helix" height="210"></canvas>
+          <div class="legend">
+            <span><i style="background:var(--a)"></i>A</span>
+            <span><i style="background:var(--t)"></i>T</span>
+            <span><i style="background:var(--c)"></i>C</span>
+            <span><i style="background:var(--g)"></i>G</span>
+            <span>A–T · C–G pairing</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Sequence viewer <span class="meta" id="seqmeta"></span></h2>
+        <div class="body"><div id="seqview"></div></div>
+      </div>
+
+      <div class="card" id="covCard" style="display:none">
+        <h2>Coverage <span class="meta" id="covMeta"></span></h2>
+        <div class="body">
+          <canvas id="cov" height="150"></canvas>
+          <div class="legend">
+            <span><i style="background:var(--a)"></i>A</span>
+            <span><i style="background:var(--c)"></i>C</span>
+            <span><i style="background:var(--g)"></i>G</span>
+            <span><i style="background:var(--t)"></i>T</span>
+            <span><i style="background:var(--n)"></i>N</span>
+            <span><i style="background:var(--del)"></i>del</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Output</h2>
+        <div class="body"><pre id="output"></pre></div>
+      </div>
     </section>
   </main>
 
   <script type="module">
-    import init, * as bio from "./pkg/bio_wasm.js";
+    import { buildSampleBam } from "./sample.js";
+
+    // The WebAssembly engine runs in a worker; the main thread only sends
+    // requests and renders results, so the UI stays responsive on large files.
+    const worker = new Worker("./worker.js", { type: "module" });
+    let rpcId = 0, onReady = () => {};
+    const pending = new Map();
+    worker.onmessage = (e) => {
+      if (e.data.ready) return onReady();
+      const { id, ok, result, error, progress } = e.data;
+      const job = pending.get(id);
+      if (!job) return;
+      if (progress !== undefined) { if (job.onProgress) job.onProgress(progress); return; }
+      pending.delete(id);
+      ok ? job.resolve(result) : job.reject(error);
+    };
+    worker.onerror = (e) => { pending.forEach((j) => j.reject(e.message)); pending.clear(); };
+    const rpc = (method, p = {}, transfer = [], onProgress = null) => new Promise((resolve, reject) => {
+      const id = ++rpcId;
+      pending.set(id, { resolve, reject, onProgress });
+      worker.postMessage({ id, method, p }, transfer);
+    });
+    // Promise-returning mirror of the engine API (each call runs in the worker).
+    const call = (fn) => (...args) => rpc("call", { fn, args });
+    const B = {
+      parse_fasta: call("parse_fasta"), sequence_stats: call("sequence_stats"),
+      reverse_complement: call("reverse_complement"), transcribe: call("transcribe"),
+      translate_seq: call("translate_seq"), six_frame_translation: call("six_frame_translation"),
+      find_open_reading_frames: call("find_open_reading_frames"), count_kmers: call("count_kmers"),
+      restriction_digest: call("restriction_digest"), gc_skew_windows: call("gc_skew_windows"),
+      search_motif: call("search_motif"),
+      setBam: (b) => rpc("setBam", { bam: b }, [b.buffer]),
+      setBai: (b) => rpc("setBai", { bai: b }, [b.buffer]),
+      parseBam: (max) => rpc("parseBam", { max }),
+      region: (ref, beg, end) => rpc("region", { ref, beg, end }),
+      pileup: (ref, beg, end) => rpc("pileup", { ref, beg, end }),
+      varcall: (ref, beg, end, reference, offset, minDepth, minFreq, rna) =>
+        rpc("varcall", { ref, beg, end, reference, offset, minDepth, minFreq, rna }),
+      streamFasta: (file, onProgress) => rpc("streamFasta", { file }, [], onProgress),
+    };
 
     const $ = (id) => document.getElementById(id);
-    const status = $("status");
-    const output = $("output");
-    const seqview = $("seqview");
-
+    const status = $("status"), output = $("output"), seqview = $("seqview");
+    const cov = $("cov");
     const isRna = () => $("isRna").checked;
+    const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-    // Extract a raw sequence from the input: first FASTA record, or the raw text.
     function currentSeq() {
       const raw = $("input").value;
       if (raw.trimStart().startsWith(">")) {
-        const lines = raw.split(/\r?\n/);
-        const body = [];
-        let started = false;
-        for (const line of lines) {
-          if (line.startsWith(">")) { if (started) break; started = true; continue; }
-          body.push(line.trim());
+        const body = []; let started = false;
+        for (const l of raw.split(/\r?\n/)) {
+          if (l.startsWith(">")) { if (started) break; started = true; continue; }
+          body.push(l.trim());
         }
         return body.join("");
       }
       return raw.replace(/\s+/g, "");
     }
 
-    function show(obj) {
-      status.className = "";
-      status.textContent = "OK";
+    function show(obj, meta) {
+      status.className = "ok"; status.textContent = "Done";
+      $("seqmeta").textContent = meta || "";
       output.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
     }
-    function fail(e) {
-      status.className = "error";
-      status.textContent = "Error: " + e;
-      output.textContent = "";
-    }
-    function clearView() { seqview.innerHTML = ""; }
+    function fail(e) { status.className = "error"; status.textContent = String(e); output.textContent = ""; }
+    function clearView() { seqview.innerHTML = ""; $("covCard").style.display = "none"; }
 
     function renderMatches(seq, matches) {
       const marks = new Array(seq.length).fill(null);
-      for (const m of matches) {
-        for (let i = m.start; i < m.end; i++) marks[i] = m.strand;
-      }
+      for (const m of matches) for (let i = m.start; i < m.end; i++) marks[i] = m.strand;
       let html = "", cls = null, open = false;
       for (let i = 0; i < seq.length; i++) {
         if (marks[i] !== cls) {
           if (open) html += "</mark>";
           cls = marks[i];
-          if (cls) { html += `<mark class="${cls === "reverse" ? "rev" : "fwd"}">`; open = true; }
-          else open = false;
+          if (cls) { html += `<mark class="${cls === "reverse" ? "rev" : "fwd"}">`; open = true; } else open = false;
         }
         html += seq[i];
       }
       if (open) html += "</mark>";
-      seqview.innerHTML = `<div>${html}</div>`;
+      seqview.innerHTML = html;
     }
 
+    const BASE_KEYS = ["a", "c", "g", "t", "n", "del"];
+    function renderCoverage(cols) {
+      $("covCard").style.display = "block";
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = cov.clientWidth || 800, cssH = 150;
+      cov.width = Math.floor(cssW * dpr); cov.height = Math.floor(cssH * dpr);
+      const ctx = cov.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssW, cssH);
+      if (!cols.length) { $("covMeta").textContent = "no coverage"; return; }
+      const colors = { a: css("--a"), c: css("--c"), g: css("--g"), t: css("--t"), n: css("--n"), del: css("--del") };
+      const maxDepth = Math.max(...cols.map((c) => c.depth));
+      const pad = 12, h = cssH - 2 * pad, barW = Math.max(1, cssW / cols.length);
+      cols.forEach((c, i) => {
+        let y = cssH - pad; const x = i * barW;
+        for (const key of BASE_KEYS) {
+          const seg = (c[key] / maxDepth) * h;
+          if (seg <= 0) continue;
+          ctx.fillStyle = colors[key];
+          ctx.fillRect(x, y - seg, Math.max(1, barW - 0.4), seg);
+          y -= seg;
+        }
+      });
+      ctx.strokeStyle = css("--border"); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, cssH - pad + 0.5); ctx.lineTo(cssW, cssH - pad + 0.5); ctx.stroke();
+      $("covMeta").textContent = `max depth ${maxDepth} · ${cols.length} columns`;
+    }
+
+    const COMP = { A: "T", T: "A", U: "A", C: "G", G: "C", N: "N" };
+    let helixAnim = null, helixSeq = null;
+    function renderHelix(seq) {
+      const bases = (seq || "").toUpperCase().replace(/[^ACGTUN]/g, "N").slice(0, 48) || "ACGT";
+      helixSeq = bases;
+      $("helixCard").style.display = "block";
+      cancelAnimationFrame(helixAnim);
+      const canvas = $("helix"), ctx = canvas.getContext("2d");
+      const colorFor = { A: css("--a"), C: css("--c"), G: css("--g"), T: css("--t"), U: css("--t"), N: css("--n") };
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = canvas.clientWidth || 800, cssH = 210;
+      canvas.width = Math.floor(cssW * dpr); canvas.height = Math.floor(cssH * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const n = bases.length, margin = 26;
+      const step = (cssW - 2 * margin) / Math.max(1, n - 1);
+      const cy = cssH / 2, amp = cssH * 0.33, twist = 0.55;
+      let t = 0;
+
+      function frame() {
+        ctx.clearRect(0, 0, cssW, cssH);
+        const pts = [];
+        for (let i = 0; i < n; i++) {
+          const ang = i * twist + t, s = Math.sin(ang), c = Math.cos(ang);
+          pts.push({
+            x: margin + i * step, ya: cy + amp * s, yb: cy - amp * s,
+            frontA: c >= 0, depth: (c + 1) / 2, base: bases[i], comp: COMP[bases[i]] || "N",
+          });
+        }
+        // sugar-phosphate backbones
+        for (const key of ["ya", "yb"]) {
+          ctx.beginPath();
+          pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p[key]) : ctx.moveTo(p.x, p[key])));
+          ctx.strokeStyle = css("--muted"); ctx.globalAlpha = 0.45; ctx.lineWidth = 2.5; ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        // base-pair rungs (gradient of the two paired bases)
+        for (const p of pts) {
+          const grad = ctx.createLinearGradient(p.x, p.ya, p.x, p.yb);
+          grad.addColorStop(0, colorFor[p.base] || "#888");
+          grad.addColorStop(1, colorFor[p.comp] || "#888");
+          ctx.strokeStyle = grad; ctx.lineWidth = 3; ctx.globalAlpha = 0.3 + 0.5 * p.depth;
+          ctx.beginPath(); ctx.moveTo(p.x, p.ya); ctx.lineTo(p.x, p.yb); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        // nucleotides, back strand first then front for correct overlap
+        const dot = (x, y, r, base, front) => {
+          ctx.globalAlpha = front ? 1 : 0.55;
+          ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.fillStyle = colorFor[base] || "#888"; ctx.fill();
+          ctx.globalAlpha = 1;
+        };
+        for (const p of pts) {
+          const rA = 2.5 + 3 * p.depth, rB = 2.5 + 3 * (1 - p.depth);
+          if (p.frontA) { dot(p.x, p.yb, rB, p.comp, false); dot(p.x, p.ya, rA, p.base, true); }
+          else { dot(p.x, p.ya, rA, p.base, false); dot(p.x, p.yb, rB, p.comp, true); }
+        }
+        t += 0.02;
+        helixAnim = requestAnimationFrame(frame);
+      }
+      frame();
+    }
+    window.addEventListener("resize", () => {
+      if (helixSeq && $("helixCard").style.display !== "none") renderHelix(helixSeq);
+    });
+
+    const region = () => [$("ref").value, +$("beg").value, +$("end").value];
+
     const actions = {
-      parse: () => show(bio.parse_fasta($("input").value, isRna())),
-      stats: () => show(bio.sequence_stats(currentSeq(), isRna())),
-      revcomp: () => show(bio.reverse_complement(currentSeq(), isRna())),
-      transcribe: () => show(bio.transcribe(currentSeq(), isRna())),
-      translate: () => show(bio.translate_seq(currentSeq(), isRna(), $("mito").checked)),
-      sixframe: () => show(bio.six_frame_translation(currentSeq(), isRna())),
-      orfs: () => show(bio.find_open_reading_frames(currentSeq(), +$("minAa").value, isRna())),
-      kmer: () => show(bio.count_kmers(currentSeq(), +$("k").value, isRna())),
-      restriction: () => show(bio.restriction_digest(currentSeq(), isRna())),
-      gcskew: () => show(bio.gc_skew_windows(currentSeq(), +$("win").value, +$("step").value, isRna())),
-      search: () => {
+      parse: async () => show(await B.parse_fasta($("input").value, isRna())),
+      stats: async () => show(await B.sequence_stats(currentSeq(), isRna())),
+      revcomp: async () => show(await B.reverse_complement(currentSeq(), isRna())),
+      transcribe: async () => show(await B.transcribe(currentSeq(), isRna())),
+      translate: async () => show(await B.translate_seq(currentSeq(), isRna(), $("mito").checked)),
+      sixframe: async () => show(await B.six_frame_translation(currentSeq(), isRna())),
+      orfs: async () => show(await B.find_open_reading_frames(currentSeq(), +$("minAa").value, isRna())),
+      kmer: async () => show(await B.count_kmers(currentSeq(), +$("k").value, isRna())),
+      restriction: async () => show(await B.restriction_digest(currentSeq(), isRna())),
+      gcskew: async () => show(await B.gc_skew_windows(currentSeq(), +$("win").value, +$("step").value, isRna())),
+      helix: () => { const s = currentSeq(); renderHelix(s); show(`Rendering double helix for ${Math.min(s.length, 48)} bp (animated).`); },
+      search: async () => {
         const seq = currentSeq();
-        const matches = bio.search_motif(seq, $("motif").value, isRna(), $("bothStrands").checked);
+        const matches = await B.search_motif(seq, $("motif").value, isRna(), $("bothStrands").checked);
         renderMatches(seq, matches);
-        show(matches);
+        show(matches, `${matches.length} hits`);
       },
     };
 
-    document.querySelectorAll("button[data-act]").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        clearView();
-        try { actions[btn.dataset.act](); } catch (e) { fail(e); }
-      })
-    );
-
+    let bamLoaded = false, baiLoaded = false;
     $("bamFile").addEventListener("change", async (ev) => {
-      const file = ev.target.files[0];
-      if (!file) return;
+      const f = ev.target.files[0]; if (!f) return;
+      await B.setBam(new Uint8Array(await f.arrayBuffer()));
+      bamLoaded = true; status.className = "ok"; status.textContent = `BAM loaded (${f.size} bytes)`;
+    });
+    $("baiFile").addEventListener("change", async (ev) => {
+      const f = ev.target.files[0]; if (!f) return;
+      await B.setBai(new Uint8Array(await f.arrayBuffer()));
+      baiLoaded = true; status.className = "ok"; status.textContent = "BAI loaded";
+    });
+    const needBam = () => { if (!bamLoaded) throw "Load or generate a BAM first"; };
+    const needBai = () => { if (!baiLoaded) throw "A BAI index is required for region queries"; };
+
+    $("fastaFile").addEventListener("change", async (ev) => {
+      const f = ev.target.files[0]; if (!f) return;
       clearView();
+      status.className = ""; status.textContent = `Streaming ${f.name}…`;
       try {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        show(bio.parse_bam(bytes, 100));
+        const res = await B.streamFasta(f, (pr) => {
+          status.textContent = `Streaming ${f.name}… ${(pr * 100).toFixed(0)}%`;
+        });
+        const L = [
+          `file:          ${f.name}  (${(f.size / 1e6).toFixed(2)} MB)`,
+          `records:       ${res.totalRecords.toLocaleString()}`,
+          `total length:  ${res.totalLength.toLocaleString()} bp`,
+          res.capped ? `(table shows the first ${res.records.length})` : "",
+          "",
+          "id".padEnd(26) + "length".padStart(14) + "   GC%",
+          "-".repeat(48),
+        ];
+        for (const r of res.records) {
+          L.push(r.id.slice(0, 24).padEnd(26) + r.length.toLocaleString().padStart(14) + "   " + (r.gc_content * 100).toFixed(1));
+        }
+        status.className = "ok"; status.textContent = `Streamed ${res.totalRecords.toLocaleString()} records from ${f.name}`;
+        $("seqmeta").textContent = `${res.totalRecords.toLocaleString()} records`;
+        output.textContent = L.join("\n");
       } catch (e) { fail(e); }
     });
 
-    init().then(() => {
-      status.textContent = "Ready. Pick an action.";
-    }).catch((e) => fail("failed to load wasm: " + e));
+    async function loadSample(seq) {
+      const s = buildSampleBam(seq, {});
+      const bamLen = s.bam.length, baiLen = s.bai.length;
+      await B.setBam(s.bam); await B.setBai(s.bai);
+      bamLoaded = baiLoaded = true;
+      $("ref").value = s.refName; $("beg").value = 0; $("end").value = s.refLen;
+      return { ...s, bamLen, baiLen };
+    }
+
+    actions.runAll = async () => {
+      const seq = currentSeq();
+      if (!seq) throw "Put a sequence in the input box first";
+      const rna = isRna(); const R = [];
+      const line = (l, v) => R.push(l.padEnd(20) + " " + v);
+
+      R.push("=== SEQUENCE ANALYSIS ===");
+      line("records (FASTA)", (await B.parse_fasta($("input").value, rna)).length);
+      const st = await B.sequence_stats(seq, rna);
+      line("length", st.length);
+      line("GC content", (st.gc_content * 100).toFixed(1) + "%");
+      line("A/C/G/T", `${st.a}/${st.c}/${st.g}/${st.t}`);
+      line("reverse-comp", await B.reverse_complement(seq, rna));
+      line("protein (std)", await B.translate_seq(seq, rna, false));
+      line("protein (mito)", await B.translate_seq(seq, rna, true));
+      const orfs = await B.find_open_reading_frames(seq, 3, rna);
+      line("ORFs (>=3aa)", orfs.length + (orfs[0] ? `  e.g. ${orfs[0].protein}` : ""));
+      const hits = await B.search_motif(seq, $("motif").value, rna, true);
+      line(`motif ${$("motif").value}`, hits.length + " hits");
+      renderMatches(seq, hits);
+      renderHelix(seq);
+      const km = await B.count_kmers(seq, +$("k").value, rna);
+      line(`top ${$("k").value}-mer`, km[0] ? `${km[0].kmer} x${km[0].count}` : "-");
+      const sites = await B.restriction_digest(seq, rna);
+      line("restriction sites", sites.map((x) => `${x.enzyme}@${x.cut}`).join(", ") || "none");
+      line("GC-skew windows", (await B.gc_skew_windows(seq, +$("win").value, +$("step").value, rna)).length);
+
+      R.push("");
+      R.push("=== ALIGNMENT (synthetic BAM) ===");
+      const s = await loadSample(seq);
+      line("generated reads", `${s.reads} x ${s.readLen} bp`);
+      line("planted SNV", `${s.refAt}>${s.altBase} @ ${s.mutPos}`);
+      line("BAM records", (await B.parseBam(0)).record_count);
+      line("region query", (await B.region(s.refName, 0, s.refLen)).length + " reads");
+      const cols = await B.pileup(s.refName, 0, s.refLen);
+      renderCoverage(cols);
+      line("pileup", `${cols.length} cols, max depth ${Math.max(...cols.map((c) => c.depth))}`);
+      const vars = await B.varcall(s.refName, 0, s.refLen, seq, 0, +$("minDepth").value, +$("minFreq").value, rna);
+      const v0 = vars[0];
+      line("variants called", vars.length + (v0 ? `  e.g. ${v0.reference}${v0.ref_pos}${v0.alternate} (${(v0.allele_freq * 100).toFixed(0)}%)` : ""));
+
+      status.className = "ok"; status.textContent = "✓ Full pipeline complete";
+      $("seqmeta").textContent = `${hits.length} motif hits`;
+      output.textContent = R.join("\n");
+    };
+
+    actions.sample = async () => {
+      const ref = currentSeq();
+      if (!ref) throw "Put a reference sequence in the input box first";
+      const s = await loadSample(ref);
+      renderCoverage(await B.pileup(s.refName, 0, s.refLen));
+      status.className = "ok";
+      status.textContent = `Generated ${s.reads} reads · SNV ${s.refAt}>${s.altBase}@${s.mutPos}`;
+      output.textContent =
+        `sample: ${s.reads} reads x ${s.readLen} bp over "${s.refName}" (${s.refLen} bp)\n` +
+        `planted SNV ${s.refAt}>${s.altBase} @ ${s.mutPos}\n` +
+        `BAM ${s.bamLen} bytes · BAI ${s.baiLen} bytes (held in worker)`;
+    };
+    actions.bamAll = async () => { needBam(); show(await B.parseBam(200)); };
+    actions.bamRegion = async () => { needBam(); needBai(); show(await B.region(...region())); };
+    actions.pileup = async () => {
+      needBam(); needBai();
+      const cols = await B.pileup(...region());
+      renderCoverage(cols); show(cols.slice(0, 200), `${cols.length} columns`);
+    };
+    actions.varcall = async () => {
+      needBam(); needBai();
+      const ref = currentSeq();
+      if (!ref) throw "Put a reference sequence in the input box";
+      show(await B.varcall(...region(), ref, 0, +$("minDepth").value, +$("minFreq").value, isRna()));
+    };
+
+    document.querySelectorAll("button[data-act]").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        const act = btn.dataset.act;
+        if (act !== "search" && act !== "runAll") clearView();
+        if (act !== "helix") { status.className = ""; status.textContent = "Working…"; }
+        try { await actions[act](); } catch (e) { fail(e); }
+      })
+    );
+
+    onReady = () => {
+      status.className = ""; status.textContent = "Ready";
+      try { renderHelix(currentSeq()); } catch (e) { /* ignore */ }
+      if (location.hash === "#run") actions.runAll().catch(fail);
+    };
   </script>
 </body>
 </html>
