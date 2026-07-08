@@ -13,6 +13,11 @@ use bio_core::analysis::translate::{
     point_mutation_effect, six_frames, translate_with, GeneticCode, MutationEffect,
 };
 use bio_core::analysis::variant::call_substitutions;
+use bio_core::crispr::{
+    design_hdr, design_knockin, enzyme_by_name, find_guides, ENZYMES as CRISPR_ENZYMES,
+};
+use bio_core::vcf::{from_substitutions, write_vcf};
+use bio_bam::varcall::pileup_variants_to_vcf;
 use bio_core::parser::{parse_fasta_str, FastaStreamer as CoreFastaStreamer, RecordSummary};
 use bio_core::sequence::{SeqKind, Sequence};
 
@@ -195,6 +200,8 @@ struct PileupVariantDto {
     depth: u32,
     alt_count: u32,
     allele_freq: f64,
+    alt_fwd: u32,
+    alt_rev: u32,
 }
 
 #[derive(Serialize)]
@@ -208,6 +215,53 @@ struct PileupDto {
     n: u32,
     del: u32,
     consensus: Option<char>,
+}
+
+#[derive(Serialize)]
+struct EnzymeDto {
+    name: &'static str,
+    pam: &'static str,
+    spacer_len: usize,
+}
+
+#[derive(Serialize)]
+struct GuideDto {
+    strand: &'static str,
+    start: usize,
+    end: usize,
+    spacer: String,
+    pam: String,
+    cut_site: usize,
+    gc: f64,
+    score: u32,
+    off_targets: u32,
+}
+
+#[derive(Serialize)]
+struct HdrDto {
+    cut_site: usize,
+    arm_len: usize,
+    left_arm: String,
+    insert: String,
+    right_arm: String,
+    donor: String,
+}
+
+#[derive(Serialize)]
+struct EditDto {
+    pos: usize,
+    from: char,
+    to: char,
+}
+
+#[derive(Serialize)]
+struct KnockinDto {
+    cut_site: usize,
+    left_arm: String,
+    insert: String,
+    right_arm: String,
+    donor: String,
+    pam_edit: Option<EditDto>,
 }
 
 #[derive(Serialize)]
@@ -416,6 +470,138 @@ pub fn mutation_effect(seq: &str, pos: usize, alt: char, is_rna: bool) -> Result
     to_js(&dto)
 }
 
+/// VCF from alignment-free substitution calls between `reference` and `sample`.
+#[wasm_bindgen]
+pub fn substitutions_vcf(
+    reference: &str,
+    sample: &str,
+    chrom: &str,
+    is_rna: bool,
+) -> Result<String, JsValue> {
+    let reference = make_seq(reference, is_rna)?;
+    let sample = make_seq(sample, is_rna)?;
+    let variants = call_substitutions(&reference, &sample).map_err(to_js_err)?;
+    Ok(write_vcf(&from_substitutions(chrom, &variants)))
+}
+
+/// VCF from a BAM region pileup: region query, quality-filtered pileup, SNV
+/// calling (with strand-bias filter), rendered with DP/AF/SB INFO.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn pileup_variants_vcf(
+    bam: &[u8],
+    bai: &[u8],
+    ref_name: &str,
+    beg: i32,
+    end: i32,
+    reference: &str,
+    ref_offset: i32,
+    min_depth: u32,
+    min_freq: f64,
+    min_qual: u8,
+    min_strand_frac: f64,
+    is_rna: bool,
+) -> Result<String, JsValue> {
+    let records = read_bam_region(bam, bai, ref_name, beg, end).map_err(to_js_err)?;
+    let columns = pileup(&records, beg, end, min_qual);
+    let reference = make_seq(reference, is_rna)?;
+    let variants =
+        call_pileup_variants(&columns, &reference, ref_offset, min_depth, min_freq, min_strand_frac);
+    Ok(pileup_variants_to_vcf(ref_name, &variants))
+}
+
+#[wasm_bindgen]
+pub fn crispr_enzymes() -> Result<JsValue, JsValue> {
+    let dto: Vec<EnzymeDto> = CRISPR_ENZYMES
+        .iter()
+        .map(|e| EnzymeDto { name: e.name, pam: e.pam, spacer_len: e.spacer_len })
+        .collect();
+    to_js(&dto)
+}
+
+/// Find CRISPR guides for `enzyme` (name, e.g. "SpCas9"), scored and annotated
+/// with in-sequence off-target counts (Hamming distance <= `max_mismatch`).
+#[wasm_bindgen]
+pub fn crispr_guides(
+    seq: &str,
+    enzyme: &str,
+    max_mismatch: usize,
+    is_rna: bool,
+) -> Result<JsValue, JsValue> {
+    let enzyme = enzyme_by_name(enzyme).ok_or_else(|| JsValue::from_str("unknown enzyme"))?;
+    let seq = make_seq(seq, is_rna)?;
+    let dto: Vec<GuideDto> = find_guides(&seq, enzyme, max_mismatch)
+        .into_iter()
+        .map(|g| GuideDto {
+            strand: match g.strand {
+                Strand::Forward => "forward",
+                Strand::Reverse => "reverse",
+            },
+            start: g.start,
+            end: g.end,
+            spacer: g.spacer,
+            pam: g.pam,
+            cut_site: g.cut_site,
+            gc: g.gc,
+            score: g.score,
+            off_targets: g.off_targets,
+        })
+        .collect();
+    to_js(&dto)
+}
+
+/// Design a knock-in donor around the guide at `guide_index` (0 = best). With
+/// `disrupt_pam`, a single PAM base is changed in the donor to block re-cutting.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn crispr_knockin(
+    seq: &str,
+    enzyme: &str,
+    guide_index: usize,
+    insert: &str,
+    arm_len: usize,
+    disrupt_pam: bool,
+    is_rna: bool,
+) -> Result<JsValue, JsValue> {
+    let enzyme = enzyme_by_name(enzyme).ok_or_else(|| JsValue::from_str("unknown enzyme"))?;
+    let seq = make_seq(seq, is_rna)?;
+    let guides = find_guides(&seq, enzyme, 0);
+    let guide = guides
+        .get(guide_index)
+        .ok_or_else(|| JsValue::from_str("no guide at that index"))?;
+    let design = design_knockin(&seq, enzyme, guide, insert, arm_len, disrupt_pam).map_err(to_js_err)?;
+    to_js(&KnockinDto {
+        cut_site: design.template.cut_site,
+        left_arm: design.template.left_arm,
+        insert: design.template.insert,
+        right_arm: design.template.right_arm,
+        donor: design.template.donor,
+        pam_edit: design.pam_edit.map(|e| EditDto { pos: e.pos, from: e.from, to: e.to }),
+    })
+}
+
+/// Design an HDR donor around `cut_site`: homology arms of `arm_len` flanking
+/// the cut with `insert` placed at it.
+#[wasm_bindgen]
+pub fn crispr_hdr(
+    reference: &str,
+    cut_site: usize,
+    insert: &str,
+    arm_len: usize,
+    is_rna: bool,
+) -> Result<JsValue, JsValue> {
+    let reference = make_seq(reference, is_rna)?;
+    let hdr = design_hdr(&reference, cut_site, insert, arm_len).map_err(to_js_err)?;
+    to_js(&HdrDto {
+        cut_site: hdr.cut_site,
+        arm_len: hdr.arm_len,
+        left_arm: hdr.left_arm,
+        insert: hdr.insert,
+        right_arm: hdr.right_arm,
+        donor: hdr.donor,
+    })
+}
+
 /// Parse a BGZF-compressed BAM file. `max_records` caps how many alignments are
 /// returned to JavaScript (0 = all); `record_count` always reflects the total.
 #[wasm_bindgen]
@@ -457,9 +643,10 @@ pub fn bam_pileup(
     ref_name: &str,
     beg: i32,
     end: i32,
+    min_qual: u8,
 ) -> Result<JsValue, JsValue> {
     let records = read_bam_region(bam, bai, ref_name, beg, end).map_err(to_js_err)?;
-    let dto: Vec<PileupDto> = pileup(&records, beg, end)
+    let dto: Vec<PileupDto> = pileup(&records, beg, end, min_qual)
         .into_iter()
         .map(|c| PileupDto {
             ref_pos: c.ref_pos,
@@ -490,13 +677,15 @@ pub fn call_variants_pileup(
     ref_offset: i32,
     min_depth: u32,
     min_freq: f64,
+    min_qual: u8,
+    min_strand_frac: f64,
     is_rna: bool,
 ) -> Result<JsValue, JsValue> {
     let records = read_bam_region(bam, bai, ref_name, beg, end).map_err(to_js_err)?;
-    let columns = pileup(&records, beg, end);
+    let columns = pileup(&records, beg, end, min_qual);
     let reference = make_seq(reference, is_rna)?;
     let dto: Vec<PileupVariantDto> =
-        call_pileup_variants(&columns, &reference, ref_offset, min_depth, min_freq)
+        call_pileup_variants(&columns, &reference, ref_offset, min_depth, min_freq, min_strand_frac)
             .into_iter()
             .map(|v| PileupVariantDto {
                 ref_pos: v.ref_pos,
@@ -505,6 +694,8 @@ pub fn call_variants_pileup(
                 depth: v.depth,
                 alt_count: v.alt_count,
                 allele_freq: v.allele_freq,
+                alt_fwd: v.alt_fwd,
+                alt_rev: v.alt_rev,
             })
             .collect();
     to_js(&dto)

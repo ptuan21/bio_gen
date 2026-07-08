@@ -18,9 +18,12 @@ self.onmessage = async (e) => {
       case "setBai": bai = p.bai; result = bai.length; break;
       case "parseBam": result = bio.parse_bam(bam, p.max); break;
       case "region": result = bio.parse_bam_region(bam, bai, p.ref, p.beg, p.end); break;
-      case "pileup": result = bio.bam_pileup(bam, bai, p.ref, p.beg, p.end); break;
+      case "pileup": result = bio.bam_pileup(bam, bai, p.ref, p.beg, p.end, p.minQual); break;
       case "varcall":
-        result = bio.call_variants_pileup(bam, bai, p.ref, p.beg, p.end, p.reference, p.offset, p.minDepth, p.minFreq, p.rna);
+        result = bio.call_variants_pileup(bam, bai, p.ref, p.beg, p.end, p.reference, p.offset, p.minDepth, p.minFreq, p.minQual, p.minStrandFrac, p.rna);
+        break;
+      case "pileupVcf":
+        result = bio.pileup_variants_vcf(bam, bai, p.ref, p.beg, p.end, p.reference, p.offset, p.minDepth, p.minFreq, p.minQual, p.minStrandFrac, p.rna);
         break;
       case "streamFasta": {
         // Read the File in slices, feeding a streaming parser. Memory stays

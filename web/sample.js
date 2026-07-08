@@ -56,7 +56,7 @@ function bgzfBlock(data) {
     .build();
 }
 
-function recordBytes(index, pos, seq) {
+function recordBytes(index, pos, seq, flag) {
   const name = "read" + index;
   const bin = reg2bin(pos, pos + seq.length);
   return new Bytes()
@@ -66,7 +66,7 @@ function recordBytes(index, pos, seq) {
     .u8(60)                       // mapq
     .u16(bin)
     .u16(1)                       // n_cigar
-    .u16(0)                       // flag
+    .u16(flag)                    // flag (0x10 = reverse strand)
     .u32(seq.length)              // l_seq
     .i32(-1).i32(-1).i32(0)       // next_ref, next_pos, tlen
     .str(name).u8(0)
@@ -103,8 +103,9 @@ export function buildSampleBam(reference, opts = {}) {
       const k = mutPos - pos;
       seq = seq.slice(0, k) + altBase + seq.slice(k + 1);
     }
+    const flag = (i % 4) >= 2 ? 0x10 : 0; // ~half the reads on the reverse strand
     const beg = bam.length;
-    const rb = recordBytes(i, pos, seq);
+    const rb = recordBytes(i, pos, seq, flag);
     bam.u32(rb.length).bytes(rb);
     placed.push({ pos, len: readLen, beg, end: bam.length });
   }

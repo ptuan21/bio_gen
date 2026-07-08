@@ -19,8 +19,9 @@ bio_gen/
 │   │   │   ├── error.rs         BioError type
 │   │   │   ├── sequence/        Sequence model, IUPAC alphabet, records
 │   │   │   ├── parser/          streaming FASTA / FASTQ readers
-│   │   │   └── analysis/        stats, search, variants, translation,
-│   │   │                        ORF finder, k-mer, restriction sites
+│   │   │   ├── analysis/        stats, search, variants, translation,
+│   │   │   │                    ORF finder, k-mer, restriction sites
+│   │   │   └── crispr.rs         guide RNA design, off-target, HDR templates
 │   │   ├── examples/pipeline.rs end-to-end demo
 │   │   └── tests/               integration tests (incl. edge cases)
 │   ├── bio-bam/                BGZF + BAM + BAI region queries (miniz_oxide)
@@ -60,9 +61,14 @@ only crate needing a DEFLATE implementation), so the core stays dependency-free.
   the index points at (and just enough leading blocks for the header), never the
   whole file
 - **Coverage pileup** (per-position depth, base counts and consensus) built by
-  walking each alignment's CIGAR
+  walking each alignment's CIGAR, with a **min base-quality (Phred) filter**
 - **SNV calling** from the pileup: consensus vs a reference, with depth/frequency
-  thresholds and allele frequency per call
+  thresholds, per-strand support, and a **strand-bias filter** (min minor-strand
+  fraction) to reject one-sided artifacts
+- **CRISPR design**: guide RNA finder (SpCas9/SaCas9/Cas12a PAM scan on both
+  strands), on-target scoring, in-sequence off-target counting, HDR donor
+  templates, and **knock-in donors with a PAM-disrupting edit** (blocks re-cutting)
+- **VCF export** (VCFv4.2) from called variants, with `DP`/`AF`/`SB` INFO
 
 ## Develop
 
@@ -112,7 +118,9 @@ Exports: `parse_fasta`, `sequence_stats`, `reverse_complement`, `transcribe`,
 `translate_seq` (with `mito` flag), `six_frame_translation`,
 `find_open_reading_frames`, `count_kmers`, `search_motif`, `gc_skew_windows`,
 `restriction_digest`, `call_variants`, `mutation_effect`, `parse_bam`,
-`parse_bam_region`, `bam_pileup`, `call_variants_pileup`.
+`parse_bam_region`, `bam_pileup`, `call_variants_pileup`, `crispr_enzymes`,
+`crispr_guides`, `crispr_hdr`, `crispr_knockin`, `substitutions_vcf`,
+`pileup_variants_vcf`, plus a streaming `FastaStreamer` class.
 
 ## Roadmap
 
@@ -123,6 +131,8 @@ Exports: `parse_fasta`, `sequence_stats`, `reverse_complement`, `transcribe`,
 - [x] True BGZF random access — region queries inflate only the needed blocks
 - [x] Engine runs in a Web Worker (non-blocking UI)
 - [x] Chunked `File.slice` streaming for multi-GB FASTA (flat memory, progress)
-- [ ] Quality-aware variant calling (use Phred scores, strand bias)
+- [x] Quality-aware pileup / variant calling (min Phred base-quality filter)
+- [x] Strand-bias filtering for variant calls (per-strand support tracked)
+- [x] VCF export (VCFv4.2) for interop with IGV / bcftools
 - [ ] Full canvas/WebGL alignment track (reads laid out by row)
 - [ ] Indel-aware calling (insertions/deletions) with proper alignment

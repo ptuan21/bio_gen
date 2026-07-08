@@ -4,9 +4,11 @@
 //! to `wasm32` for the browser. Higher layers (`bio-wasm`, UI) build on top.
 
 pub mod analysis;
+pub mod crispr;
 pub mod error;
 pub mod parser;
 pub mod sequence;
+pub mod vcf;
 
 pub use error::BioError;
 pub use sequence::{SeqKind, Sequence, SeqRecord};
@@ -22,6 +24,11 @@ pub mod prelude {
         translate_with, FrameTranslation, GeneticCode, MutationEffect,
     };
     pub use crate::analysis::variant::{call_substitutions, Variant, VariantKind};
+    pub use crate::crispr::{
+        design_hdr, design_knockin, enzyme_by_name, find_guides, Edit, Guide, HdrTemplate,
+        KnockinDesign,
+    };
+    pub use crate::vcf::{from_substitutions, write_vcf, VcfRecord};
     pub use crate::error::BioError;
     pub use crate::parser::{FastaReader, FastaStreamer, FastqReader, RecordSummary};
     pub use crate::sequence::{SeqKind, SeqRecord, Sequence};

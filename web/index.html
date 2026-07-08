@@ -67,7 +67,7 @@
       background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
     }
     textarea:focus, input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
-    input[type="text"], input[type="number"] {
+    input[type="text"], input[type="number"], select {
       background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
       border-radius: 7px; padding: 5px 8px; font-size: 12.5px; font-family: var(--mono);
     }
@@ -200,6 +200,32 @@ ATGGCCTACGGGATTCCCGAATTCAAATAGCCC</textarea>
       </div>
 
       <div class="group">
+        <p class="label">CRISPR design</p>
+        <div class="row">
+          <label class="field">enzyme
+            <select id="enzyme">
+              <option>SpCas9</option>
+              <option>SaCas9</option>
+              <option>Cas12a</option>
+            </select>
+          </label>
+          <label class="field">mm <input type="number" id="crisprMm" value="3" min="0" max="5" /></label>
+          <button data-act="crispr">Design guides</button>
+        </div>
+        <p class="hint">Scans PAM sites both strands, scores on-target, counts in-sequence off-targets.</p>
+        <div class="row">
+          <label class="field">cut <input type="number" id="hdrCut" value="17" /></label>
+          <label class="field">arm <input type="number" id="hdrArm" value="12" min="1" /></label>
+          <label class="field">insert <input type="text" id="hdrInsert" value="ATGAGCAAGGGC" style="width:120px" /></label>
+          <button data-act="hdr">HDR donor</button>
+        </div>
+        <div class="row">
+          <label class="switch"><input type="checkbox" id="disruptPam" checked /> disrupt PAM</label>
+          <button data-act="knockin">Knock-in (best guide)</button>
+        </div>
+      </div>
+
+      <div class="group">
         <p class="label">Alignment (BAM)</p>
         <div class="row"><button data-act="sample" class="primary">⚙ Generate sample BAM</button></div>
         <p class="hint">No file? Synthesize aligned reads (with a planted SNV) from the reference above.</p>
@@ -222,7 +248,10 @@ ATGGCCTACGGGATTCCCGAATTCAAATAGCCC</textarea>
         <div class="row">
           <label class="field">minDepth <input type="number" id="minDepth" value="3" min="1" /></label>
           <label class="field">minFreq <input type="number" id="minFreq" value="0.2" min="0" max="1" step="0.05" /></label>
+          <label class="field">minQ <input type="number" id="minQual" value="20" min="0" max="60" /></label>
+          <label class="field">minSB <input type="number" id="minSB" value="0" min="0" max="0.5" step="0.05" /></label>
           <button data-act="varcall">Call variants</button>
+          <button data-act="vcf">Export VCF</button>
         </div>
       </div>
     </aside>
@@ -301,13 +330,17 @@ ATGGCCTACGGGATTCCCGAATTCAAATAGCCC</textarea>
       find_open_reading_frames: call("find_open_reading_frames"), count_kmers: call("count_kmers"),
       restriction_digest: call("restriction_digest"), gc_skew_windows: call("gc_skew_windows"),
       search_motif: call("search_motif"),
+      crispr_guides: call("crispr_guides"), crispr_hdr: call("crispr_hdr"),
+      crispr_knockin: call("crispr_knockin"),
       setBam: (b) => rpc("setBam", { bam: b }, [b.buffer]),
       setBai: (b) => rpc("setBai", { bai: b }, [b.buffer]),
       parseBam: (max) => rpc("parseBam", { max }),
       region: (ref, beg, end) => rpc("region", { ref, beg, end }),
-      pileup: (ref, beg, end) => rpc("pileup", { ref, beg, end }),
-      varcall: (ref, beg, end, reference, offset, minDepth, minFreq, rna) =>
-        rpc("varcall", { ref, beg, end, reference, offset, minDepth, minFreq, rna }),
+      pileup: (ref, beg, end, minQual) => rpc("pileup", { ref, beg, end, minQual }),
+      varcall: (ref, beg, end, reference, offset, minDepth, minFreq, minQual, minStrandFrac, rna) =>
+        rpc("varcall", { ref, beg, end, reference, offset, minDepth, minFreq, minQual, minStrandFrac, rna }),
+      pileupVcf: (ref, beg, end, reference, offset, minDepth, minFreq, minQual, minStrandFrac, rna) =>
+        rpc("pileupVcf", { ref, beg, end, reference, offset, minDepth, minFreq, minQual, minStrandFrac, rna }),
       streamFasta: (file, onProgress) => rpc("streamFasta", { file }, [], onProgress),
     };
 
@@ -468,6 +501,51 @@ ATGGCCTACGGGATTCCCGAATTCAAATAGCCC</textarea>
         renderMatches(seq, matches);
         show(matches, `${matches.length} hits`);
       },
+      crispr: async () => {
+        const seq = currentSeq();
+        const guides = await B.crispr_guides(seq, $("enzyme").value, +$("crisprMm").value, isRna());
+        renderMatches(seq, guides); // protospacers highlighted by strand
+        if (guides[0]) $("hdrCut").value = guides[0].cut_site;
+        const L = [
+          `${$("enzyme").value}: ${guides.length} guides (best first)`, "",
+          "score".padStart(5) + "  " + "strand".padEnd(8) + "start".padStart(6) + "cut".padStart(6) +
+          "GC%".padStart(6) + "off".padStart(5) + "  spacer + PAM",
+          "-".repeat(66),
+        ];
+        for (const g of guides.slice(0, 60)) {
+          L.push(
+            String(g.score).padStart(5) + "  " + g.strand.padEnd(8) +
+            String(g.start).padStart(6) + String(g.cut_site).padStart(6) +
+            (g.gc * 100).toFixed(0).padStart(6) + String(g.off_targets).padStart(5) +
+            "  " + g.spacer + " " + g.pam
+          );
+        }
+        show(L.join("\n"), `${guides.length} guides`);
+      },
+      hdr: async () => {
+        const d = await B.crispr_hdr(currentSeq(), +$("hdrCut").value, $("hdrInsert").value, +$("hdrArm").value, isRna());
+        show(
+          `HDR donor · cut @ ${d.cut_site} · ${d.arm_len} bp homology arms\n\n` +
+          `left arm : ${d.left_arm}\n` +
+          `insert   : ${d.insert || "(none)"}\n` +
+          `right arm: ${d.right_arm}\n\n` +
+          `donor    : ${d.donor}`
+        );
+      },
+      knockin: async () => {
+        const seq = currentSeq();
+        if (!seq) throw "Put a sequence in the input box";
+        const k = await B.crispr_knockin(seq, $("enzyme").value, 0, $("hdrInsert").value, +$("hdrArm").value, $("disruptPam").checked, isRna());
+        const e = k.pam_edit;
+        show(
+          `Knock-in donor · best ${$("enzyme").value} guide · cut @ ${k.cut_site}\n\n` +
+          `left arm : ${k.left_arm}\n` +
+          `insert   : ${k.insert || "(none)"}\n` +
+          `right arm: ${k.right_arm}\n\n` +
+          `donor    : ${k.donor}\n\n` +
+          (e ? `PAM-disrupting edit: ${e.from}>${e.to} @ pos ${e.pos} (blocks re-cutting)` : "PAM not disrupted")
+        );
+      },
     };
 
     let bamLoaded = false, baiLoaded = false;
@@ -526,7 +604,10 @@ ATGGCCTACGGGATTCCCGAATTCAAATAGCCC</textarea>
       const line = (l, v) => R.push(l.padEnd(20) + " " + v);
 
       R.push("=== SEQUENCE ANALYSIS ===");
-      line("records (FASTA)", (await B.parse_fasta($("input").value, rna)).length);
+      const fastaText = $("input").value;
+      line("records (FASTA)", fastaText.trimStart().startsWith(">")
+        ? (await B.parse_fasta(fastaText, rna)).length
+        : "1 (raw sequence)");
       const st = await B.sequence_stats(seq, rna);
       line("length", st.length);
       line("GC content", (st.gc_content * 100).toFixed(1) + "%");
@@ -545,6 +626,8 @@ ATGGCCTACGGGATTCCCGAATTCAAATAGCCC</textarea>
       const sites = await B.restriction_digest(seq, rna);
       line("restriction sites", sites.map((x) => `${x.enzyme}@${x.cut}`).join(", ") || "none");
       line("GC-skew windows", (await B.gc_skew_windows(seq, +$("win").value, +$("step").value, rna)).length);
+      const guides = await B.crispr_guides(seq, "SpCas9", 3, rna);
+      line("CRISPR guides", guides.length + (guides[0] ? `  top ${guides[0].spacer} ${guides[0].pam} (score ${guides[0].score})` : ""));
 
       R.push("");
       R.push("=== ALIGNMENT (synthetic BAM) ===");
@@ -553,10 +636,11 @@ ATGGCCTACGGGATTCCCGAATTCAAATAGCCC</textarea>
       line("planted SNV", `${s.refAt}>${s.altBase} @ ${s.mutPos}`);
       line("BAM records", (await B.parseBam(0)).record_count);
       line("region query", (await B.region(s.refName, 0, s.refLen)).length + " reads");
-      const cols = await B.pileup(s.refName, 0, s.refLen);
+      const minQual = +$("minQual").value;
+      const cols = await B.pileup(s.refName, 0, s.refLen, minQual);
       renderCoverage(cols);
       line("pileup", `${cols.length} cols, max depth ${Math.max(...cols.map((c) => c.depth))}`);
-      const vars = await B.varcall(s.refName, 0, s.refLen, seq, 0, +$("minDepth").value, +$("minFreq").value, rna);
+      const vars = await B.varcall(s.refName, 0, s.refLen, seq, 0, +$("minDepth").value, +$("minFreq").value, minQual, +$("minSB").value, rna);
       const v0 = vars[0];
       line("variants called", vars.length + (v0 ? `  e.g. ${v0.reference}${v0.ref_pos}${v0.alternate} (${(v0.allele_freq * 100).toFixed(0)}%)` : ""));
 
@@ -569,7 +653,7 @@ ATGGCCTACGGGATTCCCGAATTCAAATAGCCC</textarea>
       const ref = currentSeq();
       if (!ref) throw "Put a reference sequence in the input box first";
       const s = await loadSample(ref);
-      renderCoverage(await B.pileup(s.refName, 0, s.refLen));
+      renderCoverage(await B.pileup(s.refName, 0, s.refLen, +$("minQual").value));
       status.className = "ok";
       status.textContent = `Generated ${s.reads} reads · SNV ${s.refAt}>${s.altBase}@${s.mutPos}`;
       output.textContent =
@@ -581,14 +665,28 @@ ATGGCCTACGGGATTCCCGAATTCAAATAGCCC</textarea>
     actions.bamRegion = async () => { needBam(); needBai(); show(await B.region(...region())); };
     actions.pileup = async () => {
       needBam(); needBai();
-      const cols = await B.pileup(...region());
+      const cols = await B.pileup(...region(), +$("minQual").value);
       renderCoverage(cols); show(cols.slice(0, 200), `${cols.length} columns`);
     };
+    const varParams = () => [currentSeq(), 0, +$("minDepth").value, +$("minFreq").value, +$("minQual").value, +$("minSB").value, isRna()];
     actions.varcall = async () => {
       needBam(); needBai();
-      const ref = currentSeq();
-      if (!ref) throw "Put a reference sequence in the input box";
-      show(await B.varcall(...region(), ref, 0, +$("minDepth").value, +$("minFreq").value, isRna()));
+      if (!currentSeq()) throw "Put a reference sequence in the input box";
+      show(await B.varcall(...region(), ...varParams()));
+    };
+    function downloadText(name, text) {
+      const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = name; a.click();
+      URL.revokeObjectURL(url);
+    }
+    actions.vcf = async () => {
+      needBam(); needBai();
+      if (!currentSeq()) throw "Put a reference sequence in the input box";
+      const vcf = await B.pileupVcf(...region(), ...varParams());
+      downloadText("variants.vcf", vcf);
+      status.className = "ok"; status.textContent = "VCF downloaded";
+      output.textContent = vcf;
     };
 
     document.querySelectorAll("button[data-act]").forEach((btn) =>

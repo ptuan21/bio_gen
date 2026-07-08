@@ -17,4 +17,4 @@ pub use bai::{parse_bai, Bai, Chunk};
 pub use bam::{parse, parse_header, read_bam, read_bam_region, BamHeader, BamRecord, Reference};
 pub use error::BamError;
 pub use pileup::{pileup, PileupColumn};
-pub use varcall::{call_variants, PileupVariant};
+pub use varcall::{call_variants, pileup_variants_to_vcf, PileupVariant};

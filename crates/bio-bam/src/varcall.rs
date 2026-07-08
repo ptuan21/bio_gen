@@ -1,4 +1,5 @@
 use bio_core::sequence::Sequence;
+use bio_core::vcf::{write_vcf, VcfRecord};
 
 use crate::pileup::PileupColumn;
 
@@ -12,6 +13,9 @@ pub struct PileupVariant {
     pub alt_count: u32,
     /// `alt_count / depth`.
     pub allele_freq: f64,
+    /// Forward / reverse read support for the alternate allele.
+    pub alt_fwd: u32,
+    pub alt_rev: u32,
 }
 
 fn normalize(base: u8) -> u8 {
@@ -27,12 +31,16 @@ fn normalize(base: u8) -> u8 {
 ///
 /// `ref_offset` is the reference position of `reference[0]` (e.g. the region
 /// start). Positions where the reference base is not `A/C/G/T` are skipped.
+///
+/// `min_strand_frac` (0 disables) filters strand-biased artifacts: the alt
+/// allele's minor-strand fraction `min(fwd, rev) / (fwd + rev)` must reach it.
 pub fn call_variants(
     columns: &[PileupColumn],
     reference: &Sequence,
     ref_offset: i32,
     min_depth: u32,
     min_freq: f64,
+    min_strand_frac: f64,
 ) -> Vec<PileupVariant> {
     let refb = reference.as_bytes();
     let mut out = Vec::new();
@@ -58,17 +66,50 @@ pub fn call_variants(
 
         if let Some((alt, alt_count)) = best {
             let freq = alt_count as f64 / col.depth as f64;
-            if freq >= min_freq {
-                out.push(PileupVariant {
-                    ref_pos: col.ref_pos,
-                    reference: ref_base as char,
-                    alternate: alt as char,
-                    depth: col.depth,
-                    alt_count,
-                    allele_freq: freq,
-                });
+            if freq < min_freq {
+                continue;
             }
+            let (alt_fwd, alt_rev) = col.strand_counts(alt);
+            let total = alt_fwd + alt_rev;
+            if min_strand_frac > 0.0 && total > 0 {
+                let minor = alt_fwd.min(alt_rev) as f64 / total as f64;
+                if minor < min_strand_frac {
+                    continue;
+                }
+            }
+            out.push(PileupVariant {
+                ref_pos: col.ref_pos,
+                reference: ref_base as char,
+                alternate: alt as char,
+                depth: col.depth,
+                alt_count,
+                allele_freq: freq,
+                alt_fwd,
+                alt_rev,
+            });
         }
     }
     out
+}
+
+/// Render pileup variants as a VCF document, carrying depth, allele frequency
+/// and per-strand support in the INFO column.
+pub fn pileup_variants_to_vcf(chrom: &str, variants: &[PileupVariant]) -> String {
+    let records: Vec<VcfRecord> = variants
+        .iter()
+        .map(|v| VcfRecord {
+            chrom: chrom.to_string(),
+            pos: v.ref_pos.max(0) as usize,
+            id: String::new(),
+            reference: v.reference.to_string(),
+            alternate: v.alternate.to_string(),
+            qual: None,
+            filter: "PASS".to_string(),
+            info: format!(
+                "DP={};AF={:.3};SB={},{}",
+                v.depth, v.allele_freq, v.alt_fwd, v.alt_rev
+            ),
+        })
+        .collect();
+    write_vcf(&records)
 }
