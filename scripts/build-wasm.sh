@@ -1,8 +1,4 @@
-#!/usr/bin/env bash
-# Build the browser-ready WebAssembly package into web/pkg.
-# Prefers wasm-pack; falls back to cargo + wasm-bindgen-cli.
 set -euo pipefail
-
 cd "$(dirname "$0")/.."
 OUT="web/pkg"
 
