@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use crate::error::{BamError, Result};
 use crate::reader::Cursor;
 
-/// A `[beg, end)` pair of BGZF virtual offsets pointing at BAM record bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Chunk {
     pub beg: u64,
@@ -17,17 +16,14 @@ struct RefIndex {
     intervals: Vec<u64>,
 }
 
-/// A parsed BAI index: one entry per reference in the companion BAM.
 #[derive(Debug, Clone, Default)]
 pub struct Bai {
     references: Vec<RefIndex>,
 }
 
-/// The pseudo-bin BAI uses to store per-reference metadata; not a real region.
 const META_BIN: u32 = 37450;
 const LINEAR_SHIFT: i32 = 14;
 
-/// The bins that can contain features overlapping `[beg, end)` (SAM spec).
 fn reg2bins(beg: i32, end: i32) -> Vec<u32> {
     let mut bins = vec![0u32];
     if end <= beg {
@@ -79,8 +75,6 @@ pub fn parse_bai(data: &[u8]) -> Result<Bai> {
 }
 
 impl Bai {
-    /// Candidate chunks for `ref_id:[beg, end)`, pruned by the linear index and
-    /// sorted by start offset. Empty if the reference is absent.
     pub fn query_chunks(&self, ref_id: usize, beg: i32, end: i32) -> Vec<Chunk> {
         let Some(reference) = self.references.get(ref_id) else {
             return Vec::new();
